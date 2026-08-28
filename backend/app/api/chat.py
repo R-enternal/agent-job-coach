@@ -9,22 +9,24 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
-from app.agent.qa_agent import _init_state, qa_graph, sanitize_messages
+from app.agent import qa_agent
+from app.agent.qa_agent import _init_state, sanitize_messages
 from app.schemas import ChatRequest
 from app.services.memory import save_history
 
 router = APIRouter(prefix="/api/agent", tags=["对话"])
 
 
-def _collect_messages(session_id: str) -> list[dict]:
-    """从 checkpointer 收集当前会话消息（不含系统消息、空内容）"""
+async def _collect_messages(session_id: str) -> list[dict]:
+    """从 checkpointer 收集当前会话消息（不含系统消息、空内容）
+
+    注意：AsyncSqliteSaver 的同步 get_tuple 在事件循环线程上会抛 InvalidStateError，
+    这里必须走图的异步接口 aget_state。
+    """
     config: RunnableConfig = {"configurable": {"thread_id": session_id}}
     try:
-        checkpoint_tuple = qa_graph.checkpointer.get_tuple(config)
-        if checkpoint_tuple is None:
-            return []
-        channel_values = checkpoint_tuple.checkpoint.get("channel_values", {})
-        messages = channel_values.get("messages", []) or []
+        snapshot = await qa_agent.qa_graph.aget_state(config)
+        messages = (snapshot.values or {}).get("messages", []) or []
         history: list[dict] = []
         for msg in messages:
             if isinstance(msg, SystemMessage):
@@ -66,7 +68,7 @@ async def _chat_events(question: str, session_id: str) -> AsyncGenerator[dict, N
     """遍历 LangGraph 事件：messages 出 token、updates 出工具事件"""
     graph_config: RunnableConfig = {"configurable": {"thread_id": session_id}}
     try:
-        async for event in qa_graph.astream(
+        async for event in qa_agent.qa_graph.astream(
             _init_state(question),
             config=graph_config,
             stream_mode=["updates", "messages"],
@@ -81,7 +83,7 @@ async def _chat_events(question: str, session_id: str) -> AsyncGenerator[dict, N
             elif mode == "updates" and isinstance(payload, dict):
                 async for ev in _emit_updates(payload):
                     yield ev
-        save_history(session_id, _collect_messages(session_id))
+        save_history(session_id, await _collect_messages(session_id))
         yield {"type": "complete"}
     except Exception as exc:
         yield {"type": "error", "data": str(exc)}

@@ -4,7 +4,7 @@
 - 节点 agent：LLM 决定调用哪些工具
 - 节点 tools：执行工具，结果回填
 - 条件边：还有 tool_calls 且未达步数上限就继续，否则结束
-- MemorySaver 按 session_id 保存多轮会话
+- AsyncSqliteSaver 按 session_id 持久化多轮会话（SQLite 文件，重启不丢）
 - 孤儿 tool_calls 自愈清洗（_sanitize_messages）
 """
 
@@ -17,7 +17,6 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from app.agent.llm import get_chat_model
@@ -142,4 +141,12 @@ _workflow.add_edge(START, "agent")
 _workflow.add_conditional_edges("agent", _should_continue, {"tools": "tools", END: END})
 _workflow.add_edge("tools", "agent")
 
-qa_graph = _workflow.compile(checkpointer=MemorySaver())
+# QA 图在 FastAPI lifespan 中编译：AsyncSqliteSaver 的 __init__ 调 asyncio.get_running_loop()，
+# 必须在运行中的事件循环里构造，无法随模块导入时创建。
+qa_graph: Any = None
+
+
+def init_qa_graph(checkpointer: Any) -> None:
+    """由 lifespan 注入 AsyncSqliteSaver 后编译图（见 main.py）"""
+    global qa_graph
+    qa_graph = _workflow.compile(checkpointer=checkpointer)

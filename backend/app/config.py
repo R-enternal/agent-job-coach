@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     mysql_host: str = "localhost"
     mysql_port: int = 3306
     mysql_user: str = "root"
-    mysql_password: str = os.environ.get("MYSQL_PASSWORD", "060311")
+    mysql_password: str = os.environ.get("MYSQL_PASSWORD", "")  # 默认空，由 .env 注入（不入库）
     mysql_db: str = "agent_job_coach"
 
     # Redis
@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     kb_chunk_size: int = 500
     kb_chunk_overlap: int = 50
 
+    # 图状态存档（LangGraph checkpoint，SQLite 文件；面试图/问答图分库，避免 thread_id 冲突）
+    checkpoint_dir: str = "./checkpoint_db"
+
     # Agent
     agent_max_steps: int = 6
     interview_max_rounds: int = 5
@@ -66,6 +69,14 @@ class Settings(BaseSettings):
     @property
     def kb_data_path(self) -> Path:
         return Path(self.kb_data_dir).resolve()
+
+    @property
+    def interview_checkpoint_db(self) -> Path:
+        return Path(self.checkpoint_dir) / "interview.db"
+
+    @property
+    def qa_checkpoint_db(self) -> Path:
+        return Path(self.checkpoint_dir) / "qa.db"
 
     @field_validator("llm_api_key", "embedding_api_key", mode="before")
     @classmethod

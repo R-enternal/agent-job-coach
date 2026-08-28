@@ -13,18 +13,44 @@ def save_interview_record(
     rounds: int,
     avg_score: float,
     summary: str,
+    detail: list | None = None,
 ) -> InterviewRecord:
+    # 幂等：同 session_id 已落库则更新（覆盖写），防结束流程重入造成唯一键冲突
+    rec = db.scalar(
+        select(InterviewRecord).where(InterviewRecord.session_id == session_id)
+    )
+    if rec is not None:
+        rec.topic = topic
+        rec.rounds = rounds
+        rec.avg_score = round(avg_score, 2)
+        rec.summary = summary
+        rec.detail = detail or []
+        db.commit()
+        db.refresh(rec)
+        return rec
     rec = InterviewRecord(
         session_id=session_id,
         topic=topic,
         rounds=rounds,
         avg_score=round(avg_score, 2),
         summary=summary,
+        detail=detail or [],
     )
     db.add(rec)
     db.commit()
     db.refresh(rec)
     return rec
+
+
+def list_interviews_by_topic(db: Session, topic: str) -> list[InterviewRecord]:
+    """同主题历史场次（按时间正序，复盘对比用）"""
+    return list(
+        db.scalars(
+            select(InterviewRecord)
+            .where(InterviewRecord.topic == topic)
+            .order_by(InterviewRecord.created_at.asc())
+        ).all()
+    )
 
 
 def save_answer_record(
@@ -35,6 +61,7 @@ def save_answer_record(
     answer: str,
     feedback: str,
     score: float,
+    skipped: bool = False,
 ) -> None:
     db.add(
         AnswerRecord(
@@ -44,6 +71,7 @@ def save_answer_record(
             answer=answer,
             feedback=feedback,
             score=score,
+            skipped=skipped,
         )
     )
     db.commit()

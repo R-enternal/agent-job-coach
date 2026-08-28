@@ -11,6 +11,7 @@ backend/.env
 
 # 向量库 / 数据库缓存（可重建）
 backend/vector_db/
+backend/checkpoint_db/
 Chroma/
 
 # 个人隐私数据（简历/JD 由用户自行维护，不入库）
@@ -25,3 +26,6 @@ frontend/dist/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 质量闸门通行证（一次性，绑定 HEAD，不入库）
+.quality-gate-pass

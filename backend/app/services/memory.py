@@ -1,6 +1,7 @@
 """Redis 记忆服务：QA 会话历史 + 面试事件流（7 天 TTL）
 
-参考仓维云：MemorySaver 存图内状态，Redis 持久化会话历史，
+图内状态由 SqliteSaver（面试图，同步）/ AsyncSqliteSaver（问答图，异步）
+持久化到 SQLite 文件；Redis 只存会话历史与面试事件，
 解决切页面/重启丢对话的问题。
 """
 
