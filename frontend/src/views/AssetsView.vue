@@ -58,6 +58,68 @@
       </el-table>
     </div>
 
+    <!-- 经历故事（STAR 双语） -->
+    <div class="card">
+      <h3>⭐ 经历故事（行为面弹药库）</h3>
+      <p class="tip">选一道高频行为题，口述你的真实经历，LLM 整理成 STAR 双语故事（不编造事实，缺的细节会提醒你补）；HR 面出题会优先围绕这些故事</p>
+      <div class="story-gen">
+        <el-select v-model="storyQuestionId" placeholder="选择行为题" class="story-q-select" @change="onStoryQuestion">
+          <el-option
+            v-for="q in storyQuestions"
+            :key="q.id"
+            :value="q.id"
+            :label="`${q.id}. ${q.zh}`"
+          />
+        </el-select>
+        <div v-if="currentStoryQuestion" class="story-q-tip">
+          {{ currentStoryQuestion.en }} ｜ 💡 {{ currentStoryQuestion.tip }}
+        </div>
+        <el-input
+          v-model="storyRaw"
+          type="textarea"
+          :rows="5"
+          placeholder="口述你的经历：背景是什么、你负责什么、做了什么、结果如何（有数字最好）…"
+        />
+        <div class="actions">
+          <el-button type="primary" :loading="generatingStory" @click="genStory">生成故事</el-button>
+        </div>
+      </div>
+
+      <el-collapse v-if="stories.length" class="story-list">
+        <el-collapse-item v-for="s in stories" :key="s.id">
+          <template #title>
+            <div class="story-title">
+              <b>{{ s.title }}</b>
+              <el-tag v-for="t in (s.tags || [])" :key="t" size="small" effect="plain" class="story-tag">{{ t }}</el-tag>
+            </div>
+          </template>
+          <div class="story-body">
+            <div class="story-sec"><b>来源题：</b>{{ s.question }}</div>
+            <div class="story-sec star-table">
+              <b>STAR：</b>
+              <div v-for="(label, k) in STAR_LABELS" :key="k" class="star-row">
+                <span class="star-label">{{ label }}</span>
+                <span>{{ s.star?.[k] || "（待补充）" }}</span>
+              </div>
+            </div>
+            <div class="story-sec"><b>中文叙述：</b><div class="story-text">{{ s.chinese_version }}</div></div>
+            <div class="story-sec"><b>英文口语：</b><div class="story-text">{{ s.english_version }}</div></div>
+            <div class="story-sec" v-if="s.language_tips?.length">
+              <b>语言润色：</b>
+              <ul><li v-for="(t, i) in s.language_tips" :key="i">{{ t }}</li></ul>
+            </div>
+            <div class="story-sec" v-if="s.can_answer?.length">
+              <b>可答问题：</b>{{ s.can_answer.map((i) => questionText(i)).join("；") }}
+            </div>
+            <div class="actions">
+              <el-button link type="danger" @click="removeStory(s)">删除</el-button>
+            </div>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
+      <div v-else class="muted">还没有故事，先生成一个</div>
+    </div>
+
     <!-- 项目编辑/草稿确认弹窗 -->
     <el-dialog v-model="showEdit" :title="form.id ? '编辑项目' : (form.source === 'llm_extract' ? '确认 LLM 抽取草稿' : '新增项目')" width="640px">
       <el-alert
@@ -107,9 +169,14 @@ import {
   updateProject,
   deleteProject,
   extractProjectDraft,
+  listStories,
+  generateStory,
+  deleteStory,
+  getStoryQuestions,
 } from "../api";
 
 const resumeLabels = { education: "教育经历", skills: "技能", experiences: "实习/项目/获奖" };
+const STAR_LABELS = { situation: "背景", task: "任务", action: "行动", result: "结果" };
 
 // ---- 简历底稿 ----
 const resumeText = ref("");
@@ -244,9 +311,55 @@ async function removeProject(row) {
   loadProjects();
 }
 
-onMounted(() => {
+// ---- 经历故事 ----
+const stories = ref([]);
+const storyQuestions = ref([]);
+const storyQuestionId = ref(null);
+const currentStoryQuestion = ref(null);
+const storyRaw = ref("");
+const generatingStory = ref(false);
+
+function onStoryQuestion(id) {
+  currentStoryQuestion.value = storyQuestions.value.find((q) => q.id === id) || null;
+}
+
+function questionText(id) {
+  return storyQuestions.value.find((q) => q.id === id)?.zh || `#${id}`;
+}
+
+async function loadStories() {
+  const r = await listStories();
+  stories.value = r.data.items || [];
+}
+
+async function genStory() {
+  if (!currentStoryQuestion.value) return ElMessage.warning("先选择行为题");
+  if (!storyRaw.value.trim()) return ElMessage.warning("先口述你的经历");
+  generatingStory.value = true;
+  try {
+    const r = await generateStory(currentStoryQuestion.value.zh, storyRaw.value);
+    if (r.data.error) return ElMessage.warning(r.data.error);
+    ElMessage.success("故事已生成，请核对（LLM 不会编造，缺的细节记得补）");
+    storyRaw.value = "";
+    loadStories();
+  } finally {
+    generatingStory.value = false;
+  }
+}
+
+async function removeStory(s) {
+  await ElMessageBox.confirm(`确认删除故事「${s.title}」？`, "删除确认", { type: "warning" });
+  await deleteStory(s.id);
+  ElMessage.success("已删除");
+  loadStories();
+}
+
+onMounted(async () => {
   loadResume();
   loadProjects();
+  loadStories();
+  const r = await getStoryQuestions();
+  storyQuestions.value = r.data.items || [];
 });
 </script>
 
@@ -265,4 +378,18 @@ onMounted(() => {
 .parsed-block ul { padding-left: 20px; color: #374151; line-height: 1.8; font-size: 13px; }
 .draft-alert { margin-bottom: 14px; }
 .star-grid { display: grid; gap: 8px; width: 100%; }
+.story-gen { margin-bottom: 14px; }
+.story-q-select { width: 100%; margin-bottom: 8px; }
+.story-q-tip { color: #6b7280; font-size: 12px; margin-bottom: 8px; }
+.story-list { margin-top: 8px; }
+.story-title { display: flex; align-items: center; gap: 8px; }
+.story-tag { margin-left: 4px; }
+.story-body { padding: 4px 8px; }
+.story-sec { margin-bottom: 12px; line-height: 1.7; }
+.story-sec ul { padding-left: 20px; }
+.story-text { background: #f9fafb; border-radius: 8px; padding: 10px 12px; margin-top: 6px; white-space: pre-wrap; }
+.star-table { display: grid; gap: 4px; }
+.star-row { display: flex; gap: 8px; }
+.star-label { flex: 0 0 40px; color: #6b7280; }
+.muted { color: #9ca3af; font-size: 13px; }
 </style>

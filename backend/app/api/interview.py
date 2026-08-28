@@ -19,6 +19,8 @@ from app.models import QuestionList
 from app.schemas import (
     InterviewAnswerRequest,
     InterviewAnswerResponse,
+    InterviewEndRequest,
+    InterviewEndResponse,
     InterviewPickRequest,
     InterviewSkipRequest,
     InterviewStartRequest,
@@ -130,6 +132,8 @@ def start(req: InterviewStartRequest):
             "current_reference": "",
             "cur_first_score": -1.0,
             "cur_followup_scores": [],
+            "cur_first_dims": {},
+            "last_dims": {},
             "q_scores": [],
             "judge_degraded": False,
         },
@@ -172,6 +176,7 @@ def answer(req: InterviewAnswerRequest):
         "feedback": feedback,
         "question_score": finalized["final"] if finalized else None,
         "skipped": False,
+        "dims": result.get("last_dims") or {},
     })
 
     db: Session = next(get_db())
@@ -196,6 +201,7 @@ def answer(req: InterviewAnswerRequest):
             question_score=finalized["final"] if finalized else None,
             judge_degraded=bool(result.get("judge_degraded")),
             progress=payload.get("progress"),
+            dims=result.get("last_dims") or None,
         )
 
     # 面试结束：复盘报告（带上场对比）+ 落库（含 q_scores detail）
@@ -210,6 +216,7 @@ def answer(req: InterviewAnswerRequest):
         summary=summary,
         question_score=finalized["final"] if finalized else None,
         judge_degraded=bool(result.get("judge_degraded")),
+        dims=result.get("last_dims") or None,
     )
 
 
@@ -293,6 +300,25 @@ def skip(req: InterviewSkipRequest):
         skipped=True,
         progress=payload.get("progress"),
     )
+
+
+@router.post("/end", response_model=InterviewEndResponse)
+def end(req: InterviewEndRequest):
+    """用户主动结束：resume op=end → route_op 置 done 直达 END（当前题作废不结算），
+    复用 _finish_interview 生成复盘报告并落库；零作答场次不落库（防脏数据）。"""
+    _ensure_running(req.session_id)
+    result = interview_graph.invoke(
+        Command(resume={"op": "end"}),
+        config=graph_config(req.session_id),
+    )
+    if not get_interview_events(req.session_id):
+        return InterviewEndResponse(
+            session_id=req.session_id,
+            summary="（本场无作答记录，未生成复盘报告）",
+            saved=False,
+        )
+    summary, _ = _finish_interview(req.session_id, result)
+    return InterviewEndResponse(session_id=req.session_id, summary=summary, saved=True)
 
 
 @router.get("/history")

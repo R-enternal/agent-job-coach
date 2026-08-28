@@ -31,6 +31,7 @@
         @keyup.enter="send"
         :disabled="loading"
       />
+      <VoiceInput @text="onVoiceText" />
       <el-button type="primary" size="large" :loading="loading" @click="send">发送</el-button>
     </div>
   </div>
@@ -39,12 +40,20 @@
 <script setup>
 import { ref, nextTick } from "vue";
 import { chatStream } from "../api";
+import VoiceInput from "../components/VoiceInput.vue";
 
 const input = ref("");
 const loading = ref(false);
 const messages = ref([]);
 const chatBox = ref(null);
 const sessionId = "chat-" + Date.now();
+
+function onVoiceText(text) {
+  // 语音识别结果追加到输入框（与已有文本之间补空格）
+  const t = (text || "").trim();
+  if (!t) return;
+  input.value = input.value ? input.value.replace(/\s+$/, "") + " " + t : t;
+}
 
 async function scrollBottom() {
   await nextTick();

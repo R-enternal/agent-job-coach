@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from app.agent.qa_agent import init_qa_graph
-from app.api import assets, chat, interview, jd, kb, qlist
+from app.api import answers, assets, chat, interview, jd, kb, qlist, stories
 from app.config import config
 from app.database import init_db
 
@@ -41,6 +41,8 @@ app.include_router(kb.router)
 app.include_router(assets.router)
 app.include_router(jd.router)
 app.include_router(qlist.router)
+app.include_router(stories.router)
+app.include_router(answers.router)
 
 
 @app.get("/")

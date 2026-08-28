@@ -38,5 +38,9 @@ class InterviewState(TypedDict):
     current_reference: str    # 当前题的题单参考要点（judge 优先用，免二次检索）
     cur_first_score: float    # 当前题首答分（-1=未评）
     cur_followup_scores: list[float]  # 当前题追问得分序列
-    q_scores: list[dict]      # 每题结算 {round,question,first,followups,final} 或 {skipped:true}
+    q_scores: list[dict]      # 每题结算 {round,question,first,followups,final,dims} 或 {skipped:true}
     judge_degraded: bool      # 评分降级显性标记（judge 重试耗尽兜底 5 分）
+
+    # ---- M5.1：五维评分 ----
+    last_dims: dict           # 最近一次 judge 的五维 {correctness,depth,structure,expression,risk_awareness}
+    cur_first_dims: dict      # 当前题首答的五维（结算进 q_scores；追问五维只进事件流）

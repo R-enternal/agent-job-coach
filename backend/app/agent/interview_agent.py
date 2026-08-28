@@ -30,6 +30,8 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel, field_validator
 
+from sqlalchemy import select
+
 from app.agent.llm import call_llm_json, get_chat_model
 from app.agent.state import InterviewState
 from app.config import config
@@ -45,10 +47,16 @@ _ASK_PROMPT = ChatPromptTemplate.from_messages([
 
 _JUDGE_PROMPT = ChatPromptTemplate.from_messages([
     ("system", "你是面试评分专家。评判候选人回答，输出 JSON（不要多余文字）：\n"
-               "{{\"score\": 0-10 的浮点数, \"feedback\": \"具体反馈：优点、不足、参考答案要点\", "
+               "{{\"score\": 0-10 的浮点数（总分）, \"feedback\": \"具体反馈：优点、不足、参考答案要点\", "
                "\"finished\": true/false（回答质量已充分暴露或轮数足够则 true）, "
-               "\"deep_dive\": true/false（回答还有明显深挖空间，值得追问则 true）}}\n"
-               "评分锚点（严格对照，不得整体抬分）：\n"
+               "\"deep_dive\": true/false（回答还有明显深挖空间，值得追问则 true）, "
+               "\"dims\": {{\"correctness\": 0-10, \"depth\": 0-10, \"structure\": 0-10, "
+               "\"expression\": 0-10, \"risk_awareness\": 0-10}}}}\n"
+               "五维指引：correctness 知识点正确性；depth 原理展开深度；structure 表达结构（先结论后展开）；\n"
+               "expression 语言准确性与术语运用；risk_awareness 对边界/坑/适用条件的意识。\n"
+               "注意：总分 score 必须严格对照下方锚点独立定档，严禁取五维平均；\n"
+               "五维只是诊断分解，各维打分尺度与总分锚点一致（如 answer 属 5-6 档，各维也应落在相近区间）。\n"
+               "评分锚点（针对总分 score，严格对照，不得整体抬分）：\n"
                "0-2 分：空答/跑题/空话堆砌/答非所问；\n"
                "3-4 分：沾边但回避了题目的核心设问，或仅有名词没有解释；\n"
                "5-6 分：要点齐全但浅尝辄止，缺原理展开或量化细节；\n"
@@ -56,6 +64,8 @@ _JUDGE_PROMPT = ChatPromptTemplate.from_messages([
                "9-10 分：原理+实践+量化结果+边界意识（知道方案的适用边界与坑）。"),
     ("human", "面试题：{question}\n候选人回答：{answer}\n参考要点：\n{reference}"),
 ])
+
+_DIM_KEYS = ("correctness", "depth", "structure", "expression", "risk_awareness")
 
 _FOLLOWUP_PROMPT = ChatPromptTemplate.from_messages([
     ("system", "你是资深技术面试官。基于面试题和候选人回答，生成一个更深一层的追问。"
@@ -68,12 +78,14 @@ _MAX_DEEP_DIVE = 2  # 深挖轮次代码强制上限（不信 LLM finished 标�
 
 
 class _JudgeResult(BaseModel):
-    """judge 输出的 Pydantic 校验：score 强制 clamp 到 0-10，修 v1 float() 裸转换"""
+    """judge 输出的 Pydantic 校验：score 强制 clamp 到 0-10，修 v1 float() 裸转换；
+    M5.1 起带五维 dims（逐维 clamp，缺失/非法维度剔除，整体缺失则空 dict）"""
 
     score: float = 5.0
     feedback: str = ""
     finished: bool = False
     deep_dive: bool = False
+    dims: dict[str, float] = {}
 
     @field_validator("score", mode="before")
     @classmethod
@@ -89,12 +101,59 @@ class _JudgeResult(BaseModel):
     def _str_feedback(cls, v: Any) -> str:
         return str(v or "")
 
+    @field_validator("dims", mode="before")
+    @classmethod
+    def _clamp_dims(cls, v: Any) -> dict[str, float]:
+        if not isinstance(v, dict):
+            return {}
+        out: dict[str, float] = {}
+        for key in _DIM_KEYS:
+            try:
+                f = float(v.get(key))
+            except (TypeError, ValueError):
+                continue
+            out[key] = max(0.0, min(10.0, f))
+        return out
+
+
+def _stories_context(topic: str) -> str:
+    """hr 题型：注入候选人 STAR 故事库摘要，让行为题围绕真实经历出（M5.2）。
+    无故事或任何异常 → 空串，静默退回原检索逻辑。"""
+    if topic != "hr":
+        return ""
+    try:
+        from app.database import SessionLocal
+        from app.models import ExperienceStory
+        from app.services.stories import BEHAVIORAL_QUESTIONS
+
+        db = SessionLocal()
+        try:
+            stories = list(db.scalars(select(ExperienceStory)).all())
+        finally:
+            db.close()
+    except Exception:
+        return ""
+    if not stories:
+        return ""
+    qmap = {q["id"]: q["zh"] for q in BEHAVIORAL_QUESTIONS}
+    lines = ["【候选人故事库】（优先围绕这些真实经历出题或追问）"]
+    for s in stories:
+        can = "、".join(qmap.get(i, str(i)) for i in (s.can_answer or []))
+        lines.append(
+            f"- 《{s.title}》标签：{'、'.join(s.tags or [])}；可答：{can}；"
+            f"素材要点：{(s.raw_answer or '')[:120]}"
+        )
+    return "\n".join(lines)
+
 
 def _generate_question(topic: str, asked: list[str], round_no: int) -> str:
     topic_name = TOPIC_NAMES.get(topic, topic)
     reference = search_as_context(topic_name, k=4, category="interview")
     if not reference.strip() or reference.strip() == "没有找到相关资料。":
         reference = search_as_context(topic_name, k=4)
+    stories_ctx = _stories_context(topic)
+    if stories_ctx:
+        reference = stories_ctx + "\n\n" + reference
     chain = _ASK_PROMPT | get_chat_model() | StrOutputParser()
     question = chain.invoke({
         "topic": topic_name,
@@ -166,6 +225,7 @@ def _ask_node(state: InterviewState) -> dict[str, Any]:
             "need_deep_dive": False,
             "cur_first_score": -1.0,
             "cur_followup_scores": [],
+            "cur_first_dims": {},
             "done": False,
         }
     # 非题单模式：现场生成（v2 行为，round 上限在 judge 兜底）
@@ -181,6 +241,7 @@ def _ask_node(state: InterviewState) -> dict[str, Any]:
         "need_deep_dive": False,
         "cur_first_score": -1.0,
         "cur_followup_scores": [],
+        "cur_first_dims": {},
         "done": False,
     }
 
@@ -214,8 +275,22 @@ def _wait_node(state: InterviewState) -> dict[str, Any]:
 
 
 def _route_op_node(state: InterviewState) -> dict[str, Any]:
-    """op 分发（纯计算，无 LLM/DB 副作用）：answer→judge；pick→改游标去 ask；skip→记 skipped 去 ask"""
+    """op 分发（纯计算，无 LLM/DB 副作用）：answer→judge；pick→改游标去 ask；
+    skip→记 skipped 去 ask；end→直达 END。
+    end 结算语义（Codex 裁决 2026-08-29）：有首答按首答结算（final=首答），无首答作废。"""
     op = state.get("op", "answer")
+    if op == "end":
+        updates: dict[str, Any] = {"done": True, "need_deep_dive": False}
+        if state.get("cur_first_score", -1.0) >= 0:
+            updates["q_scores"] = state.get("q_scores", []) + [{
+                "round": state["round"],
+                "question": state.get("base_question") or state["current_question"],
+                "first": state["cur_first_score"],
+                "followups": list(state.get("cur_followup_scores") or []),
+                "final": state["cur_first_score"],
+                "dims": state.get("cur_first_dims") or {},
+            }]
+        return updates
     if op == "pick":
         questions = state.get("questions") or []
         if not questions:  # 非题单模式无题可挑，等同 skip 当前题
@@ -242,13 +317,17 @@ def _route_op_node(state: InterviewState) -> dict[str, Any]:
 
 
 def _route_op_edge(state: InterviewState) -> str:
-    return "judge" if state.get("op", "answer") == "answer" else "ask"
+    op = state.get("op", "answer")
+    if op == "end":
+        return END
+    return "judge" if op == "answer" else "ask"
 
 
 def _judge_node(state: InterviewState) -> dict[str, Any]:
     result, degraded = _judge_answer(state)
     is_first = state.get("waiting_for") != "followup"
     first = result.score if is_first else state.get("cur_first_score", -1.0)
+    first_dims = result.dims if is_first else state.get("cur_first_dims", {})
     followups = list(state.get("cur_followup_scores") or [])
     if not is_first:
         followups.append(result.score)
@@ -259,6 +338,8 @@ def _judge_node(state: InterviewState) -> dict[str, Any]:
         "judge_degraded": degraded,
         "cur_first_score": first,
         "cur_followup_scores": followups,
+        "last_dims": result.dims,
+        "cur_first_dims": first_dims,
     }
 
     # 深挖：LLM 建议 + 未达代码上限 + 未自报完成
@@ -268,6 +349,7 @@ def _judge_node(state: InterviewState) -> dict[str, Any]:
         return updates
 
     # 本题结算：final = 首答 50% + 追问均分 50%（无追问则 final=首答）
+    # dims 取首答五维入账（追问五维已随各轮事件入 Redis，不进结算条目）
     base = first if first >= 0 else result.score
     final = round(base * 0.5 + (sum(followups) / len(followups)) * 0.5, 2) if followups else base
     updates["q_scores"] = state.get("q_scores", []) + [{
@@ -276,6 +358,7 @@ def _judge_node(state: InterviewState) -> dict[str, Any]:
         "first": base,
         "followups": followups,
         "final": final,
+        "dims": first_dims,
     }]
     updates["need_deep_dive"] = False
     if state.get("qlist_id"):
@@ -302,7 +385,7 @@ _workflow.add_node("judge", _judge_node)
 _workflow.add_edge(START, "ask")
 _workflow.add_conditional_edges("ask", _after_ask, {"wait": "wait", END: END})
 _workflow.add_edge("wait", "route_op")
-_workflow.add_conditional_edges("route_op", _route_op_edge, {"judge": "judge", "ask": "ask"})
+_workflow.add_conditional_edges("route_op", _route_op_edge, {"judge": "judge", "ask": "ask", END: END})
 _workflow.add_conditional_edges("judge", _route, {"ask": "ask", END: END})
 
 

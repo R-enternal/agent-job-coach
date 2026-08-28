@@ -99,6 +99,7 @@
           <el-button @click="quit">结束面试</el-button>
           <el-button v-if="session.mode === 'qlist'" @click="showPicker = true">挑题</el-button>
           <el-button :loading="acting" @click="skip">跳过本题</el-button>
+          <VoiceInput @text="onVoiceText" />
           <el-button type="primary" :loading="acting" @click="submit">提交回答</el-button>
         </div>
       </div>
@@ -115,11 +116,21 @@
         <el-result icon="success" :title="'本题得分 ' + current.score + ' / 10'">
           <template #sub-title>
             <div class="feedback">{{ current.feedback }}</div>
+            <div v-if="current.dims && Object.keys(current.dims).length" class="dims-row">
+              <el-tag
+                v-for="(label, key) in DIM_LABELS"
+                :key="key"
+                v-show="current.dims[key] != null"
+                size="small"
+                effect="plain"
+              >{{ label }} {{ current.dims[key] }}</el-tag>
+            </div>
             <div v-if="current.questionScore != null" class="final-score">
               本题综合 <b>{{ current.questionScore }}</b> 分（首答 50% + 追问均分 50%）
             </div>
           </template>
           <template #extra>
+            <el-button :loading="polishing" @click="polish">✨ 打磨答案</el-button>
             <el-button type="primary" v-if="current.nextQuestion" :loading="acting" @click="next">
               {{ current.nextType === "followup" ? "回答追问 →" : "下一题 →" }}
             </el-button>
@@ -146,27 +157,51 @@
           <div class="pick-text">{{ q.question }}</div>
         </div>
       </el-drawer>
-
-      <!-- 复盘报告 -->
-      <el-dialog v-model="showSummary" title="📋 面试复盘报告" width="70%">
-        <pre class="summary">{{ summary }}</pre>
-      </el-dialog>
     </div>
+
+    <!-- 复盘报告（根级：主动结束面试后 session 已重置，dialog 仍需可见） -->
+    <el-dialog v-model="showSummary" title="📋 面试复盘报告" width="70%">
+      <pre class="summary">{{ summary }}</pre>
+    </el-dialog>
+
+    <!-- 答案打磨（三档双语） -->
+    <el-dialog v-model="showPolish" title="✨ 答案打磨（三档双语）" width="720px">
+      <template v-if="polishResult">
+        <el-tabs v-model="polishTab">
+          <el-tab-pane v-for="t in ['30s', '1min', '2min']" :key="t" :label="t" :name="t">
+            <template v-if="polishResult.versions && polishResult.versions[t]">
+              <h4>中文</h4>
+              <div class="polish-text">{{ polishResult.versions[t].zh }}</div>
+              <h4>English</h4>
+              <div class="polish-text">{{ polishResult.versions[t].en }}</div>
+            </template>
+            <div v-else class="muted">该档位未生成</div>
+          </el-tab-pane>
+        </el-tabs>
+        <div v-if="polishResult.tips && polishResult.tips.length" class="polish-tips">
+          <h4>表达建议</h4>
+          <ul><li v-for="(t, i) in polishResult.tips" :key="i">{{ t }}</li></ul>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
+import VoiceInput from "../components/VoiceInput.vue";
 import {
   startInterview,
   answerInterview,
   pickQuestion,
   skipQuestion,
+  endInterview,
   listQlists,
   getQlist,
   getRecords,
   getCompare,
+  polishAnswer,
 } from "../api";
 
 const TOPIC_NAMES = {
@@ -187,6 +222,15 @@ const topics = [
 ];
 
 const topicName = (t) => TOPIC_NAMES[t] || t;
+
+// 五维评分维名（与后端 _DIM_KEYS 对齐）
+const DIM_LABELS = {
+  correctness: "正确性",
+  depth: "深度",
+  structure: "结构",
+  expression: "表达",
+  risk_awareness: "风险意识",
+};
 
 // ---- 启动区 ----
 const session = ref(null);
@@ -210,6 +254,29 @@ const showPicker = ref(false);
 const currentQIndex = ref(-1);
 const answeredIdx = ref(new Set());
 const skippedIdx = ref(new Set());
+
+// ---- 答案打磨（M5.5） ----
+const lastAnswer = ref("");      // submit 后 answer 清空，打磨要用原答
+const polishing = ref(false);
+const showPolish = ref(false);
+const polishResult = ref(null);
+const polishTab = ref("30s");
+
+async function polish() {
+  if (!lastAnswer.value.trim()) return ElMessage.warning("没有可打磨的原答");
+  polishing.value = true;
+  try {
+    const r = await polishAnswer(current.value.question, lastAnswer.value);
+    if (r.data.error) return ElMessage.warning(r.data.error);
+    polishResult.value = r.data;
+    polishTab.value = "30s";
+    showPolish.value = true;
+  } catch (e) {
+    ElMessage.warning(e.response?.data?.detail || "打磨失败");
+  } finally {
+    polishing.value = false;
+  }
+}
 
 async function loadSetup() {
   try {
@@ -249,6 +316,7 @@ function applyInterrupt(sessionId, d) {
 
 function handleFinish(d) {
   if (d.finished) {
+    if (session.value) session.value.finished = true; // 防 quit 重复调 /end
     summary.value = d.summary || "（无复盘）";
     showSummary.value = true;
   }
@@ -291,6 +359,13 @@ async function startQlist() {
   }
 }
 
+function onVoiceText(text) {
+  // 语音识别结果追加到作答框（与已有文本之间补空格）
+  const t = (text || "").trim();
+  if (!t) return;
+  answer.value = answer.value ? answer.value.replace(/\s+$/, "") + " " + t : t;
+}
+
 async function submit() {
   if (!answer.value.trim()) return;
   acting.value = true;
@@ -300,9 +375,10 @@ async function submit() {
     if (session.value.mode === "qlist" && currentQIndex.value >= 0) {
       answeredIdx.value = new Set([...answeredIdx.value, currentQIndex.value]);
     }
+    lastAnswer.value = answer.value;
     answer.value = "";
     if (d.finished) {
-      current.value = { ...current.value, score: d.score, feedback: d.feedback, questionScore: d.question_score, degraded: d.judge_degraded, nextQuestion: null };
+      current.value = { ...current.value, score: d.score, feedback: d.feedback, questionScore: d.question_score, degraded: d.judge_degraded, dims: d.dims || null, nextQuestion: null };
       handleFinish(d);
     } else {
       current.value = {
@@ -311,6 +387,7 @@ async function submit() {
         feedback: d.feedback,
         questionScore: d.question_score,
         degraded: d.judge_degraded,
+        dims: d.dims || null,
         nextQuestion: d.next_question || null,
         nextType: d.next_type || "question",
         nextRound: d.round,
@@ -381,10 +458,26 @@ async function pick(index) {
   }
 }
 
-function quit() {
+async function quit() {
+  const s = session.value;
+  // 服务端收尾：进行中的场次调 /end 生成复盘报告并落库；已自然结束的场次跳过（防 409）
+  if (s && !s.finished) {
+    try {
+      const r = await endInterview(s.id);
+      if (r.data.saved) {
+        summary.value = r.data.summary;
+        showSummary.value = true;
+      } else {
+        ElMessage.info(r.data.summary);
+      }
+    } catch (e) {
+      if (e.response?.status !== 409) {
+        ElMessage.warning(e.response?.data?.detail || "结束失败");
+      }
+    }
+  }
   session.value = null;
   current.value = {};
-  showSummary.value = false;
   progress.value = null;
   selectedQlistId.value = null;
   compare.value = null;
@@ -419,9 +512,13 @@ onMounted(loadSetup);
 .q-head .el-tag { margin-right: 8px; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
 .feedback { text-align: left; line-height: 1.8; padding: 0 20px; }
+.dims-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 12px; }
 .final-score { margin-top: 10px; color: #374151; }
 .degraded-alert { margin-bottom: 10px; }
 .summary { white-space: pre-wrap; font-family: inherit; line-height: 1.8; max-height: 60vh; overflow-y: auto; }
+.polish-text { background: #f9fafb; border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; line-height: 1.7; margin-bottom: 12px; }
+.polish-tips { margin-top: 8px; }
+.polish-tips ul { padding-left: 20px; line-height: 1.8; }
 .pick-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; cursor: pointer; }
 .pick-item:hover { border-color: #7dd3fc; }
 .pick-item.active { border-color: #0ea5e9; background: #f0f9ff; }

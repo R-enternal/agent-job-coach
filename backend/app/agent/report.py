@@ -6,16 +6,27 @@ from langchain_core.prompts import ChatPromptTemplate
 from app.agent.llm import get_chat_model
 
 _REVIEW_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", "你是求职教练。根据模拟面试记录生成结构化复盘报告：\n"
-               "## 总体评价（含平均分{prev_hint}）\n## 各题得分与点评\n"
-               "## 暴露的薄弱点（按严重程度排序）\n## 改进计划（具体可执行）\n"
+    ("system", "你是求职教练。根据模拟面试记录生成结构化复盘报告（所有得分满分均为 10 分）：\n"
+               "## 总体评价（含平均分{prev_hint}）\n## 各题得分与点评（结合五维指出亮点/短板）\n"
+               "## 暴露的薄弱点（按严重程度排序，按五维低分维度归因）\n## 改进计划（具体可执行）\n"
+               "## 表达建议（2-4 条，聚焦表达而非知识点，不与各题点评重复；"
+               "每条格式：【原句】摘录候选人原话 → 【改进】更有说服力的说法 → "
+               "【理由】为什么更好；关注表达结构、量化意识、术语准确性）\n"
                "## 下次面试前必背清单"),
     ("human", "面试主题：{topic}\n轮次记录：\n{history}"),
 ])
 
+_DIM_LABELS = {
+    "correctness": "正确性",
+    "depth": "深度",
+    "structure": "结构",
+    "expression": "表达",
+    "risk_awareness": "风险意识",
+}
+
 
 def _fmt_event(e: dict) -> str:
-    """单条事件 → 报告行：首答/追问分开列，结算题附 final（首答50%+追问均分50%）"""
+    """单条事件 → 报告行：首答/追问分开列，结算题附 final（首答50%+追问均分50%），有五维则列出"""
     if e.get("skipped"):
         return f"第{e['round']}题：{e['question']}\n【已跳过，未作答不计分】\n"
     line = (
@@ -23,6 +34,11 @@ def _fmt_event(e: dict) -> str:
         f"我的回答：{e['answer'][:300]}\n"
         f"本轮得分：{e['score']}；点评：{e['feedback']}\n"
     )
+    dims = e.get("dims") or {}
+    if dims:
+        line += "五维：" + " / ".join(
+            f"{_DIM_LABELS.get(k, k)} {v}" for k, v in dims.items()
+        ) + "\n"
     if e.get("question_score") is not None:
         line += f"本题综合分：{e['question_score']}（首答50% + 追问均分50%）\n"
     return line

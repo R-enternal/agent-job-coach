@@ -22,6 +22,9 @@ data/jd/
 frontend/node_modules/
 frontend/dist/
 
+# 后端运行日志
+backend/uvicorn*.log
+
 # 系统
 .DS_Store
 Thumbs.db

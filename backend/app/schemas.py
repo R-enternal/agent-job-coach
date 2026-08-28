@@ -28,6 +28,18 @@ class InterviewPickRequest(BaseModel):
     index: int
 
 
+class InterviewEndRequest(BaseModel):
+    """用户主动结束面试（op=end：当前题作废不结算）"""
+
+    session_id: str
+
+
+class InterviewEndResponse(BaseModel):
+    session_id: str
+    summary: str
+    saved: bool  # 零作答场次不落库（False）
+
+
 class InterviewSkipRequest(BaseModel):
     """跳过当前题：不计分、不计均分、标记 skipped 可见"""
 
@@ -57,6 +69,7 @@ class InterviewAnswerResponse(BaseModel):
     judge_degraded: bool = False            # 评分降级显性标记
     skipped: bool = False                   # 本次操作是 skip
     progress: Optional[dict] = None         # 题单模式：{"consumed": n, "total": m}（前端进度条）
+    dims: Optional[dict] = None             # 本次作答的五维评分（降级时为空）
 
 
 class KbUploadResponse(BaseModel):

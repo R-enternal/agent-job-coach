@@ -79,8 +79,21 @@ export const pickQuestion = (sessionId, index) =>
   api.post("/interview/pick", { session_id: sessionId, index });
 export const skipQuestion = (sessionId) =>
   api.post("/interview/skip", { session_id: sessionId });
+export const endInterview = (sessionId) =>
+  api.post("/interview/end", { session_id: sessionId });
 export const getRecords = () => api.get("/interview/records");
 export const getCompare = (topic) =>
   api.get("/interview/compare", { params: { topic } });
+
+// ---------- STAR 经历故事 ----------
+export const listStories = () => api.get("/stories");
+export const generateStory = (question, rawAnswer) =>
+  api.post("/stories", { question, raw_answer: rawAnswer });
+export const deleteStory = (id) => api.delete(`/stories/${id}`);
+export const getStoryQuestions = () => api.get("/stories/questions");
+
+// ---------- 答案打磨 ----------
+export const polishAnswer = (question, answer, storyId = null) =>
+  api.post("/answers/polish", { question, answer, story_id: storyId });
 
 export default api;

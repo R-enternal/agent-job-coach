@@ -113,3 +113,24 @@ class QuestionList(Base):
     questions: Mapped[list] = mapped_column(JSON, default=list)  # [{qtype,question,difficulty,source,reference}]
     status: Mapped[str] = mapped_column(String(16), default="active")  # active / archived
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+class ExperienceStory(Base):
+    """STAR 经历故事库（M5.2）：行为面弹药，由口述素材 LLM 整理，人审后使用"""
+
+    __tablename__ = "experience_stories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(128), default="")
+    question: Mapped[str] = mapped_column(String(512), default="")  # 来源行为题
+    raw_answer: Mapped[str] = mapped_column(Text, default="")       # 用户口述原文
+    star: Mapped[dict] = mapped_column(JSON, default=dict)          # situation/task/action/result
+    chinese_version: Mapped[str] = mapped_column(Text, default="")  # 中文面试叙述版
+    english_version: Mapped[str] = mapped_column(Text, default="")  # 英文口语版
+    language_tips: Mapped[list] = mapped_column(JSON, default=list)  # 表达润色建议
+    tags: Mapped[list] = mapped_column(JSON, default=list)          # 能力标签
+    can_answer: Mapped[list] = mapped_column(JSON, default=list)    # 可回答的内置行为题
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, onupdate=datetime.now
+    )
