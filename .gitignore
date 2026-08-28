@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+backend/.venv/
+
+# 环境与密钥（含 MySQL 密码、API Key，绝不入库）
+.env
+backend/.env
+*.env.local
+
+# 向量库 / 数据库缓存（可重建）
+backend/vector_db/
+Chroma/
+
+# 个人隐私数据（简历/JD 由用户自行维护，不入库）
+data/resume/
+data/jd/
+
+# 前端依赖与构建产物
+frontend/node_modules/
+frontend/dist/
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini

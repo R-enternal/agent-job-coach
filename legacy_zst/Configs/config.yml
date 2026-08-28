@@ -1,0 +1,10 @@
+# 对话模型：DeepSeek API（OpenAI 兼容）
+# 可切换：deepseek-chat / deepseek-reasoner
+model_name: deepseek-chat
+server_url: https://api.deepseek.com/v1
+
+# Embedding 模型：智谱 GLM（OpenAI 兼容；DeepSeek 不提供 embedding 接口）
+embedding_name: embedding-2
+embedding_server_url: https://open.bigmodel.cn/api/paas/v4/
+
+reporter_prompt_path: prompts/report_prompt.txt
