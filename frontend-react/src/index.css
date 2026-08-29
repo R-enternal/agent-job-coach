@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-[#f6f7f9] text-slate-900 antialiased;
+  font-feature-settings: "cv02", "cv03";
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-slate-300/70;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-400/70;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
