@@ -4,6 +4,16 @@
     <div v-if="!session" class="setup">
       <h2>🎤 模拟面试</h2>
       <p>选择主题现场出题，或按 JD 定制题单开考：出题 → 作答 → 评分 → 追问 → 复盘报告</p>
+      <div v-if="savedMeta" class="card resume-card">
+        <h3>⏸ 有一场未完成的面试</h3>
+        <p class="resume-info">
+          {{ savedMeta.topicName }} · 第 {{ savedMeta.round }} 题 · {{ (savedMeta.question || "").slice(0, 40) }}
+        </p>
+        <div class="resume-actions">
+          <el-button type="primary" :loading="resuming" @click="resumeSession">继续上一场</el-button>
+          <el-button plain @click="discardSaved">放弃并清空</el-button>
+        </div>
+      </div>
       <div class="topics">
         <el-card v-for="t in topics" :key="t.value" class="topic" shadow="hover" @click="startTopic(t)">
           <h3>{{ t.label }}</h3>
@@ -201,6 +211,7 @@ import {
   getQlist,
   getRecords,
   getCompare,
+  getInterviewState,
   polishAnswer,
 } from "../api";
 
@@ -246,6 +257,93 @@ const records = ref([]);
 const loadingRecords = ref(false);
 const compareTopic = ref("");
 const compare = ref(null);
+
+// ---- 上一场恢复（切页面/刷新不丢） ----
+const SAVED_KEY = "ajc_active_interview";
+const savedMeta = ref(null);
+const resuming = ref(false);
+
+function saveSessionMeta(s) {
+  localStorage.setItem(SAVED_KEY, JSON.stringify({
+    session_id: s.id,
+    topic: s.topic,
+    topicName: s.topicName,
+    mode: s.mode,
+    qlist_id: s.qlistId || null,
+  }));
+}
+
+function clearSavedMeta() {
+  localStorage.removeItem(SAVED_KEY);
+  savedMeta.value = null;
+}
+
+async function checkSavedSession() {
+  const raw = localStorage.getItem(SAVED_KEY);
+  if (!raw) return;
+  try {
+    const m = JSON.parse(raw);
+    const r = await getInterviewState(m.session_id);
+    if (r.data.resumable) {
+      savedMeta.value = {
+        ...m,
+        round: r.data.round,
+        question: r.data.question,
+        waiting_for: r.data.waiting_for,
+        progress: r.data.progress,
+      };
+    } else {
+      clearSavedMeta();
+    }
+  } catch {
+    clearSavedMeta();
+  }
+}
+
+async function resumeSession() {
+  if (!savedMeta.value) return;
+  resuming.value = true;
+  try {
+    const m = savedMeta.value;
+    session.value = {
+      id: m.session_id,
+      topic: m.topic,
+      topicName: m.topicName,
+      mode: m.mode,
+      qlistId: m.qlist_id,
+      finished: false,
+    };
+    if (m.mode === "qlist" && m.qlist_id) {
+      const detail = await getQlist(m.qlist_id);
+      qlistQuestions.value = detail.data.questions || [];
+      answeredIdx.value = new Set();
+      skippedIdx.value = new Set();
+    } else {
+      qlistQuestions.value = [];
+    }
+    progress.value = m.progress || null;
+    current.value = {
+      round: m.round || 1,
+      question: m.question || "",
+      type: m.waiting_for === "followup" ? "followup" : "question",
+      feedback: "",
+    };
+    if (m.mode === "qlist") {
+      currentQIndex.value = qlistQuestions.value.findIndex(
+        (q) => q.question === current.value.question
+      );
+    }
+    clearSavedMeta();
+  } catch (e) {
+    ElMessage.warning(e.response?.data?.detail || "恢复失败");
+  } finally {
+    resuming.value = false;
+  }
+}
+
+function discardSaved() {
+  clearSavedMeta();
+}
 
 // ---- 题单模式 ----
 const progress = ref(null);
@@ -317,6 +415,7 @@ function applyInterrupt(sessionId, d) {
 function handleFinish(d) {
   if (d.finished) {
     if (session.value) session.value.finished = true; // 防 quit 重复调 /end
+    clearSavedMeta();
     summary.value = d.summary || "（无复盘）";
     showSummary.value = true;
   }
@@ -328,6 +427,7 @@ async function startTopic(t) {
     const sid = "iv-" + Date.now();
     const r = await startInterview({ topic: t.value, session_id: sid });
     session.value = { id: sid, topic: t.value, topicName: t.label, mode: "topic" };
+    saveSessionMeta(session.value);
     progress.value = null;
     qlistQuestions.value = [];
     applyInterrupt(sid, r.data);
@@ -349,7 +449,14 @@ async function startQlist() {
     qlistQuestions.value = detail.data.questions || [];
     answeredIdx.value = new Set();
     skippedIdx.value = new Set();
-    session.value = { id: sid, topic: "mixed", topicName: `题单 #${selectedQlistId.value}`, mode: "qlist" };
+    session.value = {
+      id: sid,
+      topic: "mixed",
+      topicName: `题单 #${selectedQlistId.value}`,
+      mode: "qlist",
+      qlistId: selectedQlistId.value,
+    };
+    saveSessionMeta(session.value);
     progress.value = r.data.progress || null;
     applyInterrupt(sid, r.data);
   } catch (e) {
@@ -481,10 +588,14 @@ async function quit() {
   progress.value = null;
   selectedQlistId.value = null;
   compare.value = null;
+  clearSavedMeta();
   loadSetup();
 }
 
-onMounted(loadSetup);
+onMounted(() => {
+  loadSetup();
+  checkSavedSession();
+});
 </script>
 
 <style scoped>
@@ -492,6 +603,10 @@ onMounted(loadSetup);
 .setup { max-width: 960px; margin: 0 auto; text-align: center; padding-top: 24px; }
 .setup h2 { margin-bottom: 8px; }
 .setup > p { color: #6b7280; margin-bottom: 24px; }
+.resume-card { border: 1px dashed #f59e0b; background: #fffbeb; text-align: left; }
+.resume-card h3 { margin-bottom: 6px; }
+.resume-info { color: #6b7280; font-size: 13px; margin-bottom: 10px; }
+.resume-actions { display: flex; gap: 10px; }
 .topics { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 16px; }
 .topic { cursor: pointer; }
 .topic h3 { margin-bottom: 6px; }

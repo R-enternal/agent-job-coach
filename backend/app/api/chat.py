@@ -1,6 +1,7 @@
 """对话 API：SSE 流式（对标仓维云 /api/agent/chat_stream 事件流）"""
 
 import json
+import sqlite3
 from typing import AsyncGenerator
 
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage, SystemMessage
@@ -12,7 +13,8 @@ from sse_starlette.sse import EventSourceResponse
 from app.agent import qa_agent
 from app.agent.qa_agent import _init_state, sanitize_messages
 from app.schemas import ChatRequest
-from app.services.memory import save_history
+from app.config import config
+from app.services.memory import get_history, list_sessions, remove_session, save_history
 
 router = APIRouter(prefix="/api/agent", tags=["对话"])
 
@@ -112,3 +114,37 @@ async def chat(req: ChatRequest) -> dict:
         elif ev["type"] == "error":
             return {"answer": f"出错了：{ev['data']}"}
     return {"answer": "".join(answer_parts) if answer_parts else "（暂无回答，请换个问法）"}
+
+
+@router.get("/sessions")
+def sessions():
+    """会话列表（多会话管理）：按最后活动倒序，含消息数与首条摘要"""
+    return {"items": list_sessions()}
+
+
+@router.get("/history")
+async def history(session_id: str):
+    """某会话的消息历史：优先读 Redis，Redis 过期则回退图 checkpoint"""
+    msgs = get_history(session_id)
+    if not msgs:
+        msgs = await _collect_messages(session_id)
+    return {"session_id": session_id, "messages": msgs}
+
+
+@router.delete("/sessions/{session_id}")
+def delete_session(session_id: str):
+    """删除会话：清 Redis 历史/索引 + SQLite checkpoint（图内状态）"""
+    remove_session(session_id)
+    # 清理问答图 checkpoint（thread_id 行）
+    try:
+        conn = sqlite3.connect(str(config.qa_checkpoint_db))
+        try:
+            cur = conn.cursor()
+            for table in ("checkpoints", "writes"):
+                cur.execute(f"DELETE FROM {table} WHERE thread_id = ?", (session_id,))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return {"deleted": True, "session_id": session_id}

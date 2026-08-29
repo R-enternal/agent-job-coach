@@ -42,6 +42,13 @@ export async function chatStream(question, sessionId, onEvent) {
   }
 }
 
+// ---------- 会话管理（多会话） ----------
+export const listSessions = () => api.get("/agent/sessions");
+export const getChatHistory = (sessionId) =>
+  api.get("/agent/history", { params: { session_id: sessionId } });
+export const deleteChatSession = (sessionId) =>
+  api.delete(`/agent/sessions/${encodeURIComponent(sessionId)}`);
+
 // ---------- 素材库 ----------
 export const upsertResume = (rawText, version = "default") =>
   api.post("/assets/resume", { raw_text: rawText, version });
@@ -84,6 +91,8 @@ export const endInterview = (sessionId) =>
 export const getRecords = () => api.get("/interview/records");
 export const getCompare = (topic) =>
   api.get("/interview/compare", { params: { topic } });
+export const getInterviewState = (sessionId) =>
+  api.get("/interview/state", { params: { session_id: sessionId } });
 
 // ---------- STAR 经历故事 ----------
 export const listStories = () => api.get("/stories");

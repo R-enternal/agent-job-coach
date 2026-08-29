@@ -86,6 +86,30 @@ def _pending_meta(session_id: str) -> tuple[int, str]:
         return -1, ""
 
 
+@router.get("/state")
+def interview_state(session_id: str):
+    """查询场次状态（前端"继续上一场"用）：是否暂停可恢复 + 当前题/轮次/进度"""
+    try:
+        snap = interview_graph.get_state(graph_config(session_id))
+        values = snap.values or {}
+        return {
+            "session_id": session_id,
+            "resumable": bool(snap.created_at) and bool(snap.next),
+            "topic": values.get("topic", ""),
+            "round": int(values.get("round", 0)),
+            "question": str(values.get("current_question", "")),
+            "waiting_for": str(values.get("waiting_for", "")),
+            "deep_dive_round": int(values.get("deep_dive_round", 0)),
+            "qlist_id": int(values.get("qlist_id", 0) or 0),
+            "progress": {
+                "consumed": int(values.get("q_idx", 0)),
+                "total": len(values.get("questions") or []),
+            } if values.get("qlist_id") else None,
+        }
+    except Exception:
+        return {"session_id": session_id, "resumable": False}
+
+
 def _last_finalized(result: dict, pending_round: int) -> dict | None:
     """本次 invoke 新结算的题（q_scores 末尾且非 skipped 且 round 匹配挂起题）"""
     q_scores = result.get("q_scores") or []
