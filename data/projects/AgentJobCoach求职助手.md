@@ -33,5 +33,5 @@ FastAPI → LangGraph 多智能体 → 工具层 → 分类知识库（向量+BM
 - MySQL 落库：面试记录、评分、学习计划
 
 ## 来源
-由 ZST 智扫通（扫地机器人客服教学项目）重构而来：手写 ReAct → LangGraph 编排，
+由手写 ReAct 重构为 LangGraph 编排，
 场景从产品客服改为求职面试陪练，新增面试状态机与分类知识库。

@@ -1,5 +1,0 @@
-query,answer
-生成2023年1月份的销售报告,"Validation Error in args:1 validation error for ReportGeneration
-query
-  Field required [type=missing, input_value={'year': '2023', 'month': '01'}, input_type=dict]
-    For further information visit https://errors.pydantic.dev/2.11/v/missing,args:{'year': '2023', 'month': '01'}"

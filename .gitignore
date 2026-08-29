@@ -21,8 +21,6 @@ data/jd/
 # 前端依赖与构建产物
 frontend/node_modules/
 frontend/dist/
-frontend-react/node_modules/
-frontend-react/dist/
 
 # 后端运行日志
 backend/uvicorn*.log
