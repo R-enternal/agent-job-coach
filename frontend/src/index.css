@@ -4,12 +4,12 @@
 
 html,
 body,
-#root {
+#app {
   height: 100%;
 }
 
 body {
-  @apply bg-[#f6f7f9] text-slate-900 antialiased;
+  @apply bg-[#f7f8fa] text-slate-900 antialiased;
   font-feature-settings: "cv02", "cv03";
 }
 
@@ -18,10 +18,10 @@ body {
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  @apply rounded-full bg-slate-300/70;
+  @apply rounded-full bg-slate-300/60;
 }
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-slate-400/70;
+  @apply bg-slate-400/60;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
