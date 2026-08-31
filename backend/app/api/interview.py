@@ -46,8 +46,7 @@ def _finish_interview(session_id: str, result: dict) -> tuple[str, float]:
     """面试结束统一收尾：复盘报告（带上场对比）+ 落库（含 q_scores detail）。
     返回 (summary, avg)。
     avg 口径 = 每题 final（首答50%+追问均分50%）的均分，skipped 不计——
-    与 /compare 的 per_question_final_avg 同口径（2026-08-29 审查统一起见，
-    不再按作答事件计分：追问是同题能力暴露的深化，不该与首答平权稀释）。"""
+    不按作答事件计分：追问是同题能力暴露的深化，不该与首答平权稀释。"""
     events = get_interview_events(session_id)
     topic = result.get("topic", "mixed")
     db: Session = next(get_db())
@@ -350,40 +349,6 @@ def history(session_id: str):
     """查看某场面试的事件记录（含 skipped 标记）"""
     events = get_interview_events(session_id)
     return {"session_id": session_id, "rounds": events}
-
-
-@router.get("/compare")
-def compare(topic: str, db: Session = Depends(get_db)):
-    """同主题场次纵向对比：首场 vs 最近场的每题 final 均分（复测提升口径来源）"""
-    sessions = list_interviews_by_topic(db, topic)
-    if not sessions:
-        return {"topic": topic, "n_sessions": 0, "items": [], "first_vs_latest": None}
-
-    def per_q_final_avg(rec) -> float | None:
-        finals = [q["final"] for q in (rec.detail or [])
-                  if isinstance(q, dict) and not q.get("skipped") and q.get("final") is not None]
-        return round(sum(finals) / len(finals), 2) if finals else None
-
-    items = [{
-        "session_id": r.session_id,
-        "avg_score": r.avg_score,
-        "per_question_final_avg": per_q_final_avg(r),
-        "created_at": r.created_at.isoformat() if r.created_at else None,
-    } for r in sessions]
-
-    first_vs_latest = None
-    if len(sessions) >= 2:
-        f, l = per_q_final_avg(sessions[0]), per_q_final_avg(sessions[-1])
-        if f is not None and l is not None:
-            first_vs_latest = {
-                "first_session": sessions[0].session_id,
-                "latest_session": sessions[-1].session_id,
-                "first_final_avg": f,
-                "latest_final_avg": l,
-                "delta": round(l - f, 2),
-            }
-    return {"topic": topic, "n_sessions": len(sessions), "items": items,
-            "first_vs_latest": first_vs_latest}
 
 
 @router.get("/records")

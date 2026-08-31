@@ -86,9 +86,15 @@ const send = async () => {
     });
   } catch (e: any) {
     ai.content = "请求失败：" + e.message;
+    input.value = q; // 失败回填输入框，避免用户重打
   }
   loading.value = false;
   reloadSessions();
+};
+
+const onEnter = (e: KeyboardEvent) => {
+  if (e.isComposing) return; // 中文输入法组词中，回车是选词而非发送
+  send();
 };
 
 const onVoice = (t: string) => {
@@ -173,7 +179,7 @@ onMounted(async () => {
           :disabled="loading"
           placeholder="输入你的求职问题，Enter 发送…"
           class="h-11 flex-1 rounded-xl border border-slate-200 px-4 text-base outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10 disabled:bg-slate-50"
-          @keydown.enter="send"
+          @keydown.enter="onEnter"
         />
         <UButton class="w-11 px-0" :disabled="loading || !input.trim()" @click="send">
           <Send class="h-4 w-4" />

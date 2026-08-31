@@ -13,11 +13,11 @@ AI 面试官逐题提问、智能追问并实时打分，结束后生成复盘�
 | 题单生成 | 按 JD 要求 + 个人素材 + 题库检索定制出题，配额制（agent/rag/project/八股/hr），LLM 出题不足由题库补齐并标注来源 |
 | 模拟面试 | LangGraph 状态机「出题→作答→评分→追问」，支持自由挑题 / 跳过 / 主动结束 / **语音输入**；每题综合分 = 首答 50% + 追问均分 50%；**五维评分**（正确性/深度/结构/表达/风险意识）+ **三档答案打磨**（30s/1min/2min 双语） |
 | 知识问答 | SSE 流式对话，Agentic RAG：检索封装为工具由 Agent 自主调用，回答标注引用来源 |
-| 复盘对比 | 每场生成复盘报告（含五维归因与表达建议、上场对比）；同主题首场 vs 最近场每题均分 delta |
+| 复盘对比 | 每场生成复盘报告（含五维归因与表达建议、上场对比）；历史场次点击可回看问答明细（Redis 事件流保留 7 天） |
 
 ## 技术栈
 
-Python · FastAPI · LangGraph · Vue3 · Element Plus · MySQL · SQLite · Redis · Chroma · 智谱 GLM 全家桶（glm-5.1 对话 / glm-4v-plus 视觉 / embedding-2 向量）
+Python · FastAPI · LangGraph · Vue3 · Tailwind · MySQL · SQLite · Redis · Chroma · 智谱 GLM 全家桶（glm-5.1 对话 / glm-4v-plus 视觉 / embedding-2 向量）
 
 ## 架构
 
@@ -72,7 +72,7 @@ API 文档：http://127.0.0.1:9902/docs
 1. **素材库**：粘贴简历全文（自动结构化）→ 新增项目档案（或「从知识库抽取草稿」后确认）
 2. **JD 定制**：粘贴 JD 文本或上传截图 → 核对解析草稿 →「确认无误」→ 生成定制题单
 3. **模拟面试**：按主题现场出题，或选择题单开考；作答 / 挑题 / 跳过，AI 评分并智能追问
-4. **复盘**：结束自动生成复盘报告；启动页可查看同主题首场 vs 最近场的提升 delta
+4. **复盘**：结束自动生成复盘报告（含上场对比）；面试页「历史场次」点击任意场次可回看问答明细
 
 ## 目录结构
 
@@ -83,7 +83,7 @@ API 文档：http://127.0.0.1:9902/docs
 │   ├── app/rag/        # 解析 / 切块 / 混合检索
 │   ├── app/services/   # 素材库 / JD / 题单 / 记忆 / 记录
 │   └── scripts/        # seed_kb.py 灌库 / eval_judge.py 评分评测
-├── frontend/           # Vue3 + Element Plus
+├── frontend/           # Vue3 + Tailwind（自研组件）
 ├── data/
 │   ├── interview_questions/  # 面试题库
 │   ├── projects/             # 项目文档（知识库种子）

@@ -94,7 +94,8 @@ export const endInterview = (session_id: string) => api.post("/interview/end", {
 export const getInterviewState = (session_id: string) =>
   api.get("/interview/state", { params: { session_id } });
 export const getInterviewRecords = () => api.get("/interview/records");
-export const getCompare = (topic: string) => api.get("/interview/compare", { params: { topic } });
+export const getInterviewHistory = (sessionId: string) =>
+  api.get("/interview/history", { params: { session_id: sessionId } });
 export const polishAnswer = (question: string, answer: string) =>
   api.post("/answers/polish", { question, answer });
 

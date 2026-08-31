@@ -5,8 +5,8 @@ import {
   RotateCcw, Send, SkipForward, Sparkles, StopCircle, Wand2,
 } from "lucide-vue-next";
 import {
-  answerInterview, endInterview, generateQlist, getInterviewRecords, getInterviewState,
-  getQlist, listJds, parseJdImage, parseJdText, pickQuestion, polishAnswer,
+  answerInterview, endInterview, generateQlist, getInterviewHistory, getInterviewRecords,
+  getInterviewState, getQlist, listJds, parseJdImage, parseJdText, pickQuestion, polishAnswer,
   skipQuestion, startInterview, updateJd,
 } from "../api";
 import { InterviewRecord, Jd, Qlist, QLIST_QUOTA, QTYPE_NAMES, TOPIC_NAMES } from "../lib/types";
@@ -66,6 +66,20 @@ const loadRecords = () =>
   getInterviewRecords()
     .then((r) => (records.value = r.data || []))
     .catch(() => {});
+
+/* 历史场次回放：事件流在 Redis（7 天 TTL），过期仅留 MySQL 汇总 */
+const replay = ref<{ title: string; rounds: any[] } | null>(null);
+const openReplay = async (r: InterviewRecord) => {
+  const title = `${TOPIC_NAMES[r.topic] || r.topic} · ${r.rounds} 题 · 均分 ${
+    r.avg_score != null ? r.avg_score.toFixed(1) : "-"
+  }`;
+  try {
+    const res = await getInterviewHistory(r.session_id);
+    replay.value = { title, rounds: res.data.rounds || [] };
+  } catch {
+    replay.value = { title, rounds: [] };
+  }
+};
 const reloadJds = () =>
   listJds()
     .then((r) => (jds.value = r.data.items || []))
@@ -262,6 +276,7 @@ const submit = async () => {
       push(newQMsg(d));
     }
   } catch (e: any) {
+    answer.value = ans; // 失败回填，避免白答
     push({ kind: "sys", text: "请求失败：" + e.message });
   } finally {
     busy.value = false;
@@ -344,7 +359,7 @@ const doPolish = async (m: Extract<Msg, { kind: "s" }>) => {
 };
 
 const onAnswerKeydown = (e: KeyboardEvent) => {
-  if (e.key === "Enter" && !e.shiftKey) {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
     submit();
   }
@@ -473,17 +488,20 @@ const polishVersions = computed<[string, any][]>(() =>
           </h2>
           <p v-if="records.length === 0" class="py-3 text-center text-sm text-slate-400">暂无场次</p>
           <ul v-else class="divide-y divide-slate-100">
-            <li
-              v-for="r in records.slice(0, 8)"
-              :key="r.session_id"
-              class="flex items-center justify-between py-3 text-sm"
-            >
-              <span class="font-medium text-slate-700">{{ TOPIC_NAMES[r.topic] || r.topic }}</span>
-              <span class="text-sm text-slate-400">
-                {{ r.rounds }} 题 · 均分 <b class="text-slate-700">{{ r.avg_score?.toFixed(1) }}</b>
-              </span>
+            <li v-for="r in records.slice(0, 8)" :key="r.session_id">
+              <button
+                class="-mx-2 flex w-[calc(100%+1rem)] items-center justify-between rounded-lg px-2 py-3 text-left text-sm transition hover:bg-brand-50/60"
+                title="查看本场问答回放"
+                @click="openReplay(r)"
+              >
+                <span class="font-medium text-slate-700">{{ TOPIC_NAMES[r.topic] || r.topic }}</span>
+                <span class="text-sm text-slate-400">
+                  {{ r.rounds }} 题 · 均分 <b class="text-slate-700">{{ r.avg_score?.toFixed(1) }}</b>
+                </span>
+              </button>
             </li>
           </ul>
+          <p v-if="records.length" class="mt-1.5 text-xs text-slate-400">点击场次回看问答详情（明细保留 7 天）</p>
         </section>
       </div>
     </aside>
@@ -631,6 +649,34 @@ const polishVersions = computed<[string, any][]>(() =>
         <ul class="list-disc space-y-1.5 pl-5 text-base text-amber-700">
           <li v-for="(t, i) in polish.tips" :key="i">{{ t }}</li>
         </ul>
+      </div>
+    </UModal>
+
+    <!-- 历史场次问答回放 -->
+    <UModal v-if="replay" :title="replay.title" wide @close="replay = null">
+      <p v-if="replay.rounds.length === 0" class="py-6 text-center text-base text-slate-400">
+        该场次无作答明细（明细在 Redis 保留 7 天，过期仅留汇总记录）
+      </p>
+      <div
+        v-for="(rd, i) in replay.rounds"
+        :key="i"
+        class="mb-4 rounded-xl border border-slate-200/80 p-4"
+      >
+        <p class="mb-2 text-base font-semibold leading-snug text-slate-800">
+          Q{{ rd.round }}　{{ rd.question }}
+        </p>
+        <p v-if="rd.skipped" class="text-sm text-amber-600">已跳过（不计分）</p>
+        <template v-else>
+          <p class="whitespace-pre-wrap text-base leading-relaxed text-slate-700">答：{{ rd.answer }}</p>
+          <div class="mt-2.5 flex items-center gap-4 border-t border-slate-100 pt-2.5 text-sm text-slate-500">
+            <span>评分 <b class="text-brand-600">{{ rd.score }}</b>/10</span>
+            <span v-if="rd.question_score != null">
+              本题综合 <b class="text-slate-700">{{ rd.question_score }}</b>
+            </span>
+          </div>
+          <ScoreDims v-if="rd.dims && Object.keys(rd.dims).length" :dims="rd.dims" class="mt-2" />
+          <p class="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-500">{{ rd.feedback }}</p>
+        </template>
       </div>
     </UModal>
   </div>
