@@ -30,8 +30,6 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel, field_validator
 
-from sqlalchemy import select
-
 from app.agent.llm import call_llm_json, get_chat_model
 from app.agent.state import InterviewState
 from app.config import config
@@ -116,44 +114,11 @@ class _JudgeResult(BaseModel):
         return out
 
 
-def _stories_context(topic: str) -> str:
-    """hr 题型：注入候选人 STAR 故事库摘要，让行为题围绕真实经历出（M5.2）。
-    无故事或任何异常 → 空串，静默退回原检索逻辑。"""
-    if topic != "hr":
-        return ""
-    try:
-        from app.database import SessionLocal
-        from app.models import ExperienceStory
-        from app.services.stories import BEHAVIORAL_QUESTIONS
-
-        db = SessionLocal()
-        try:
-            stories = list(db.scalars(select(ExperienceStory)).all())
-        finally:
-            db.close()
-    except Exception:
-        return ""
-    if not stories:
-        return ""
-    qmap = {q["id"]: q["zh"] for q in BEHAVIORAL_QUESTIONS}
-    lines = ["【候选人故事库】（优先围绕这些真实经历出题或追问）"]
-    for s in stories:
-        can = "、".join(qmap.get(i, str(i)) for i in (s.can_answer or []))
-        lines.append(
-            f"- 《{s.title}》标签：{'、'.join(s.tags or [])}；可答：{can}；"
-            f"素材要点：{(s.raw_answer or '')[:120]}"
-        )
-    return "\n".join(lines)
-
-
 def _generate_question(topic: str, asked: list[str], round_no: int) -> str:
     topic_name = TOPIC_NAMES.get(topic, topic)
     reference = search_as_context(topic_name, k=4, category="interview")
     if not reference.strip() or reference.strip() == "没有找到相关资料。":
         reference = search_as_context(topic_name, k=4)
-    stories_ctx = _stories_context(topic)
-    if stories_ctx:
-        reference = stories_ctx + "\n\n" + reference
     chain = _ASK_PROMPT | get_chat_model() | StrOutputParser()
     question = chain.invoke({
         "topic": topic_name,

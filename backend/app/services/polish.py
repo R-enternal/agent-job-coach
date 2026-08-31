@@ -1,19 +1,17 @@
 """三档答案打磨（M5.5）：原始回答 → 30s/1min/2min 三档双语答案 + 表达建议
 
-铁律（写进 prompt）：只用候选人原答与故事库素材中的事实，禁止编造数字与经历。
+铁律（写进 prompt）：只用候选人原答中的事实，禁止编造数字与经历。
 """
 
 from pydantic import BaseModel, field_validator
-from sqlalchemy.orm import Session
 
 from app.agent.llm import call_llm_json
-from app.models import ExperienceStory
 
 _TIERS = ("30s", "1min", "2min")
 
 _POLISH_PROMPT = """你是面试表达教练。基于候选人的原始回答，打磨出三档时长的面试答案（中文 + 英文口语版），并给表达建议。
 
-铁律：只用候选人原答与所附素材中的事实，禁止编造数字与经历；
+铁律：只用候选人原答中的事实，禁止编造数字与经历；
 原答缺失细节时保持留白，在 tips 里提醒候选人补充。
 
 三档口径：
@@ -26,8 +24,7 @@ _POLISH_PROMPT = """你是面试表达教练。基于候选人的原始回答，
  "tips": ["表达建议 1", "表达建议 2"]}}
 
 面试题：{question}
-候选人原始回答：{answer}
-{story_block}"""
+候选人原始回答：{answer}"""
 
 
 class _PolishVersion(BaseModel):
@@ -56,20 +53,10 @@ class _PolishResult(BaseModel):
         return [str(x) for x in v if str(x).strip()]
 
 
-def polish_answer(
-    db: Session, question: str, answer: str, story_id: int | None = None
-) -> dict:
-    """打磨三档双语答案。story_id 命中时注入 STAR 素材。LLM 失败由 API 层转 502。"""
-    story_block = ""
-    if story_id:
-        story = db.get(ExperienceStory, story_id)
-        if story is not None:
-            story_block = (
-                "候选人故事库素材（可引用其中事实）：\n"
-                f"《{story.title}》STAR：{story.star}\n叙述：{story.chinese_version}"
-            )
+def polish_answer(question: str, answer: str) -> dict:
+    """打磨三档双语答案。LLM 失败由 API 层捕获返回 error。"""
     result = _PolishResult.model_validate(call_llm_json(_POLISH_PROMPT.format(
-        question=question, answer=answer, story_block=story_block,
+        question=question, answer=answer,
     )))
     return {
         "versions": {k: v.model_dump() for k, v in result.versions.items()},
