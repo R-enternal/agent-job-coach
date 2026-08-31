@@ -12,8 +12,10 @@ from app.rag.store import add_documents, delete_by_source, get_store
 router = APIRouter(prefix="/api/kb", tags=["知识库"])
 
 
+# 端点均为同步 def：内部有 embedding HTTP 请求 / Chroma 全量拉取 / 文件解析等
+# 阻塞调用，声明 async 会卡住事件循环（SSE 流同步受影响），交给线程池执行
 @router.get("/documents")
-async def documents():
+def documents():
     """知识库文档列表：按 source（文件名）聚合，返回分类与块数"""
     data = get_store().get(include=["metadatas"])
     agg: dict[str, dict] = {}
@@ -32,25 +34,25 @@ async def documents():
 
 
 @router.delete("/documents")
-async def delete_document(source: str):
+def delete_document(source: str):
     """按来源文件名删除文档的全部切块"""
     delete_by_source(source)
     return {"deleted": source}
 
 
 @router.get("/search")
-async def search(q: str, category: str = "", k: int = 5):
+def search(q: str, category: str = "", k: int = 5):
     items = hybrid_search(q, k=k, category=category or None)
     return {"query": q, "items": items}
 
 
 @router.get("/categories")
-async def categories():
+def categories():
     return CATEGORY_NAMES
 
 
 @router.post("/upload")
-async def upload(category: str, file: UploadFile):
+def upload(category: str, file: UploadFile):
     """上传文件到知识库（resume/jd/project/interview），解析切块入库"""
     if category not in CATEGORY_NAMES:
         return {"error": f"非法分类 {category}（支持：{'/'.join(CATEGORY_NAMES)}）"}
@@ -59,7 +61,7 @@ async def upload(category: str, file: UploadFile):
     if suffix not in (".md", ".txt", ".html", ".pdf", ".docx", ".markdown"):
         return {"error": f"不支持的文件类型 {suffix}"}
     max_bytes = config.max_upload_mb * 1024 * 1024
-    data = await file.read(max_bytes + 1)
+    data = file.file.read(max_bytes + 1)  # 同步端点走线程池，直接用底层文件对象
     if len(data) > max_bytes:
         return {"error": f"文件超过大小限制（{config.max_upload_mb}MB）"}
     if not data:

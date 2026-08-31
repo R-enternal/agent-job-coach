@@ -85,7 +85,9 @@ async def _chat_events(question: str, session_id: str) -> AsyncGenerator[dict, N
             elif mode == "updates" and isinstance(payload, dict):
                 async for ev in _emit_updates(payload):
                     yield ev
-        save_history(session_id, await _collect_messages(session_id))
+        messages = await _collect_messages(session_id)
+        if messages:  # 收集异常会返回 []，空结果不保存——避免误删 Redis 已有历史
+            save_history(session_id, messages)
         yield {"type": "complete"}
     except Exception as exc:
         yield {"type": "error", "data": str(exc)}

@@ -191,6 +191,14 @@ def answer(req: InterviewAnswerRequest):
     answered_round = pending_round if pending_round > 0 else round_no
     answered_question = pending_question or question
 
+    # 先写 MySQL（持久化），再写 Redis 事件流（缓存，best-effort）
+    db: Session = next(get_db())
+    try:
+        save_answer_record(db, req.session_id, answered_round,
+                           answered_question, req.answer, feedback, score)
+    finally:
+        db.close()
+
     append_interview_event(req.session_id, {
         "round": answered_round,
         "question": answered_question,
@@ -201,13 +209,6 @@ def answer(req: InterviewAnswerRequest):
         "skipped": False,
         "dims": result.get("last_dims") or {},
     })
-
-    db: Session = next(get_db())
-    try:
-        save_answer_record(db, req.session_id, answered_round,
-                           answered_question, req.answer, feedback, score)
-    finally:
-        db.close()
 
     payload = extract_interrupt(result)
     if payload is not None:
@@ -281,6 +282,13 @@ def skip(req: InterviewSkipRequest):
     skipped_question = str((skipped_entry or {}).get("question", "")) or pending_question
     skipped_round = int((skipped_entry or {}).get("round", pending_round if pending_round > 0 else 0))
 
+    db: Session = next(get_db())
+    try:
+        save_answer_record(db, req.session_id, skipped_round, skipped_question,
+                           "", "已跳过", 0.0, skipped=True)
+    finally:
+        db.close()
+
     append_interview_event(req.session_id, {
         "round": skipped_round,
         "question": skipped_question,
@@ -290,12 +298,6 @@ def skip(req: InterviewSkipRequest):
         "question_score": None,
         "skipped": True,
     })
-    db: Session = next(get_db())
-    try:
-        save_answer_record(db, req.session_id, skipped_round, skipped_question,
-                           "", "已跳过", 0.0, skipped=True)
-    finally:
-        db.close()
 
     payload = extract_interrupt(result)
     if payload is None:
