@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     debug: bool = True
     host: str = "0.0.0.0"
     port: int = 9902
+    max_upload_mb: int = 10  # 上传文件大小上限（知识库文件 / JD 截图）
 
     # 智谱 GLM 对话模型（OpenAI 兼容；实测带推理链，max_tokens 需调大）
     llm_api_key: str = os.environ.get("ZHIPU_API_KEY", "")

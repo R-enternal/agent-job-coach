@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, UploadFile
 
+from app.config import config
 from app.rag.loader import CATEGORY_NAMES, parse_file
 from app.rag.search import hybrid_search
 from app.rag.store import add_documents, delete_by_source, get_store
@@ -51,15 +52,23 @@ async def categories():
 @router.post("/upload")
 async def upload(category: str, file: UploadFile):
     """上传文件到知识库（resume/jd/project/interview），解析切块入库"""
-    suffix = Path(file.filename or "").suffix.lower()
+    if category not in CATEGORY_NAMES:
+        return {"error": f"非法分类 {category}（支持：{'/'.join(CATEGORY_NAMES)}）"}
+    filename = Path(file.filename or "").name  # 只取 basename，防路径穿越
+    suffix = Path(filename).suffix.lower()
     if suffix not in (".md", ".txt", ".html", ".pdf", ".docx", ".markdown"):
         return {"error": f"不支持的文件类型 {suffix}"}
-    data = await file.read()
-    tmp = Path("_upload_tmp") / f"{category}_{file.filename}"
+    max_bytes = config.max_upload_mb * 1024 * 1024
+    data = await file.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        return {"error": f"文件超过大小限制（{config.max_upload_mb}MB）"}
+    if not data:
+        return {"error": "空文件"}
+    tmp = Path("_upload_tmp") / f"{category}_{filename}"
     tmp.parent.mkdir(exist_ok=True)
     tmp.write_bytes(data)
     docs = parse_file(tmp, category)
     if docs:
         add_documents(docs)
     tmp.unlink(missing_ok=True)
-    return {"filename": file.filename, "category": category, "chunks": len(docs)}
+    return {"filename": filename, "category": category, "chunks": len(docs)}

@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, UploadFile
 from sqlalchemy.orm import Session
 
+from app.config import config
 from app.database import get_db
 from app.schemas import JdParseTextRequest, JdUpdateRequest
 from app.services.jd import (
@@ -33,10 +34,13 @@ def parse_image(file: UploadFile, db: Session = Depends(get_db)):
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in _IMAGE_SUFFIX:
         return {"error": f"不支持的图片类型 {suffix}（支持 png/jpg/jpeg/webp）"}
-    data = file.file.read()  # 同步端点走线程池，直接用底层文件对象
+    max_bytes = config.max_upload_mb * 1024 * 1024
+    data = file.file.read(max_bytes + 1)  # 同步端点走线程池，直接用底层文件对象
     if not data:
         return {"error": "空文件"}
-    return jd_to_dict(parse_image_jd(db, file.filename or "jd.png", data))
+    if len(data) > max_bytes:
+        return {"error": f"图片超过大小限制（{config.max_upload_mb}MB）"}
+    return jd_to_dict(parse_image_jd(db, Path(file.filename or "jd.png").name, data))
 
 
 @router.get("")
